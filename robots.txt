@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+Sitemap: https://narwhalthepong.github.io/photoncalc/sitemap.xml
+Sitemap: https://narwhalthepong.github.io/photoncalc/jobs/sitemap.xml
