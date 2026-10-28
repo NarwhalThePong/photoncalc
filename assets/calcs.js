@@ -325,6 +325,20 @@
       dphi_rad_per_V: PI / vpi, dphi_deg_per_V: 180 / vpi, push_pull: config === 'pp' };
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, consts: { C: C, H: H, QE: QE } };
+  // 25. laser coherence length from linewidth. lambda nm, linewidth value + unit (Hz/kHz/MHz/GHz/pm/nm), lineshape, medium (group) index n,
+  // optional path difference opd_m (medium length, 0 = skip). tau_c: Lorentzian 1/(pi dnu), Gaussian sqrt(2 ln2/pi)/dnu, simple 1/dnu.
+  function coherence(lam_nm, w, unit, shape, n, opd_m) {
+    pos(lam_nm, 'Wavelength'); pos(w, 'Linewidth'); pos(n, 'Group index n');
+    req(isFinite(opd_m) && opd_m >= 0, 'Path difference must be zero or positive');
+    var lam = lam_nm * 1e-9, fu = { Hz: 1, kHz: 1e3, MHz: 1e6, GHz: 1e9 }, lu = { pm: 1e-12, nm: 1e-9 }, dnu;
+    if (fu[unit]) dnu = w * fu[unit]; else if (lu[unit]) { req(w * lu[unit] < lam, 'Linewidth must be smaller than the wavelength'); dnu = C * w * lu[unit] / (lam * lam); } else throw new Error('Unknown linewidth unit');
+    var tau;
+    if (shape === 'lorentz') tau = 1 / (PI * dnu); else if (shape === 'gauss') tau = Math.sqrt(2 * Math.LN2 / PI) / dnu; else if (shape === 'simple') tau = 1 / dnu; else throw new Error('Unknown lineshape');
+    var vis = null;
+    if (opd_m > 0) { var t = n * opd_m / C; vis = shape === 'lorentz' ? Math.exp(-PI * dnu * t) : shape === 'gauss' ? Math.exp(-Math.pow(PI * dnu * t, 2) / (4 * Math.LN2)) : null; }
+    return { dnu_Hz: dnu, dlam_pm: dnu * lam * lam / C * 1e12, tau_s: tau, Lc_vac_m: C * tau, Lc_m: C * tau / n, Lc_simple_m: C / (n * dnu), visibility: vis, shape: shape };
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
