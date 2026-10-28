@@ -469,6 +469,25 @@
     return out;
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, consts: { C: C, H: H, QE: QE } };
+  // 33. Single-layer anti-reflection coating at normal incidence (Hecht, Optics, 5th ed., sec. 9.7.1; Born & Wolf, Principles of
+  // Optics, 7th ed., sec. 1.6.4; Macleod, Thin-Film Optical Filters, 4th ed., ch. 3). Interface amplitude coefficients
+  // r1 = (n0 - n1)/(n0 + n1), r2 = (n1 - ns)/(n1 + ns); phase thickness delta = 2*pi*n1*d/lambda; Airy sum
+  // R = (r1^2 + r2^2 + 2 r1 r2 cos 2delta) / (1 + r1^2 r2^2 + 2 r1 r2 cos 2delta). Quarter-wave layer d = m*lambda0/(4 n1), m odd,
+  // gives R = ((n0 ns - n1^2)/(n0 ns + n1^2))^2, zero when n1 = sqrt(n0 ns). Window with two identical surfaces, no absorption,
+  // incoherent multiple reflections: T = (1 - R)/(1 + R). Ignores dispersion of the indices and absorption.
+  function arCoat(lam0_nm, n1, ns, n0, lam_nm, m) {
+    pos(lam0_nm, 'Design wavelength'); pos(n1, 'Coating index'); pos(ns, 'Substrate index'); pos(n0, 'Ambient index');
+    req(isFinite(lam_nm) && lam_nm >= 0, 'Evaluation wavelength must be zero (use design) or positive');
+    req(isFinite(m) && m >= 1 && Math.round(m) === m && m % 2 === 1, 'Quarter-wave order must be an odd whole number (1, 3, 5, ...)');
+    var lam = lam_nm > 0 ? lam_nm : lam0_nm, d = m * lam0_nm / (4 * n1);
+    var r1 = (n0 - n1) / (n0 + n1), r2 = (n1 - ns) / (n1 + ns), c2 = Math.cos(4 * PI * n1 * d / lam);
+    var R = (r1 * r1 + r2 * r2 + 2 * r1 * r2 * c2) / (1 + r1 * r1 * r2 * r2 + 2 * r1 * r2 * c2);
+    var q = (n0 * ns - n1 * n1) / (n0 * ns + n1 * n1), Rq = q * q, Rb = Math.pow((n0 - ns) / (n0 + ns), 2);
+    return { ideal_n: Math.sqrt(n0 * ns), d_nm: d, opt_nm: n1 * d, lam_nm: lam, R_bare_pct: Rb * 100, R_design_pct: Rq * 100, R_pct: R * 100,
+      gain_pct: (Rb - R) * 100, T_win_bare_pct: (1 - Rb) / (1 + Rb) * 100, T_win_pct: (1 - R) / (1 + R) * 100,
+      reduction: R > 0 ? Rb / R : Infinity };
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
