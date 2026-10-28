@@ -411,6 +411,21 @@
       peakA_nm: lam_nm + d / (2 * PI) * fsr_m * 1e9, dL_target_um: dL_t };
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, consts: { C: C, H: H, QE: QE } };
+  // 30. fiber optic link loss budget (FOA / TIA-568 style). Powers in dBm, losses in dB. Total passive loss =
+  // L*alpha + nc*lc + ns*ls (+ other); available budget = P_tx - S_rx; margin = budget - loss - safety margin.
+  // Maximum reach = (budget - connectors - splices - other - safety margin) / alpha (0 if the fixed losses already exceed it).
+  function linkBudget(ptx, srx, L_km, alpha, nc, lc, ns, ls, other, safety) {
+    req(isFinite(ptx) && isFinite(srx), 'Transmitter power and receiver sensitivity must be numbers');
+    req(ptx > srx, 'Transmitter power must be higher than the receiver sensitivity');
+    req(isFinite(L_km) && L_km >= 0, 'Fiber length must be zero or positive'); pos(alpha, 'Fiber attenuation');
+    [nc, ns].forEach(function (n) { req(isFinite(n) && n >= 0 && Math.floor(n) === n, 'Connector and splice counts must be whole numbers'); });
+    [lc, ls, other, safety].forEach(function (x) { req(isFinite(x) && x >= 0, 'Losses and margins must be zero or positive'); });
+    var fiber = L_km * alpha, conn = nc * lc, spl = ns * ls, loss = fiber + conn + spl + other, budget = ptx - srx;
+    var margin = budget - loss - safety, fixed = conn + spl + other + safety;
+    return { fiber_dB: fiber, conn_dB: conn, splice_dB: spl, loss_dB: loss, budget_dB: budget, prx_dBm: ptx - loss,
+      margin_dB: margin, ok: margin >= 0, maxL_km: Math.max(0, (budget - fixed) / alpha) };
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
