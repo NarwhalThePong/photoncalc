@@ -15,4 +15,5 @@ table.res td{text-align:right;font-variant-numeric:tabular-nums;font-weight:600;
 .cards li{border:1px solid #e1e6ef;border-radius:10px;padding:.8rem}.cards a{font-weight:600;text-decoration:none}.cards p{margin:.3rem 0 0;font-size:.9rem;color:#4a5468}
 .cat{font-size:.75rem;background:#eef2ff;color:#3442a8;border-radius:8px;padding:1px 7px}
 details{border-bottom:1px solid #e5e8ef;padding:.5rem 0}summary{cursor:pointer;font-weight:600}
+.digest{background:#f6f8fc;border:1px solid #dfe5f0;border-radius:10px;padding:.8rem 1rem;margin-top:2rem;font-size:.9rem}.digest h2{font-size:1rem;margin:0 0 .3rem}.digest p{margin:.3rem 0}.digest input[type=email]{padding:.35rem;border:1px solid #c7cfdd;border-radius:6px}.privacy-note{color:#5a6378;font-size:.8rem}
 footer{margin-top:2rem;border-top:1px solid #e5e8ef;padding-top:.8rem;font-size:.85rem;color:#5a6378}.src{font-size:.85rem;color:#4a5468}
