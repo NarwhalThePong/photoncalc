@@ -446,6 +446,29 @@
       ok: margin === null ? null : margin >= 0, nmax: nmax };
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, consts: { C: C, H: H, QE: QE } };
+  // 32. Airy disk / diffraction-limited resolution of a uniformly illuminated circular aperture (Airy 1835; Born & Wolf,
+  // Principles of Optics, 7th ed., sec. 8.5.2 and 8.6.2; Hecht, Optics, 5th ed., sec. 10.2.5). Intensity I(v) = I0 [2 J1(v)/v]^2 with
+  // v = pi*D*r/(lambda*f) = 2*pi*NA*r/lambda. Dark rings at the zeros of J1: v = 3.8317, 7.0156 -> r = (v/pi)*lambda*N
+  // (N = f/D = 1/(2NA)), i.e. r_Airy = 1.21967*lambda*N = 0.60983*lambda/NA (Rayleigh criterion). Half maximum at v = 1.61634 ->
+  // FWHM = 1.02899*lambda*N. Abbe limit d = lambda/(2NA). Angular radius theta = 1.21967*lambda/D. Incoherent MTF cutoff
+  // nu_c = 1/(lambda*N) = 2NA/lambda (Goodman, Introduction to Fourier Optics, 3rd ed., sec. 6.3), Nyquist pixel pitch = lambda*N/2.
+  // Paraxial: NA = D/(2f) when NA is not given. 83.8 % of the energy lies inside the first dark ring.
+  var J1Z1 = 3.8317059702075125, J1Z2 = 7.015586669815619, AIRY_HM = 1.6163399561827614;
+  function airy(lam_nm, D_mm, f_mm, NA_in, pix_um) {
+    pos(lam_nm, 'Wavelength'); pos(D_mm, 'Aperture diameter');
+    req(isFinite(f_mm) && f_mm >= 0, 'Focal length must be zero (use NA) or positive');
+    req(isFinite(NA_in) && NA_in >= 0 && NA_in <= 1.7, 'NA must be zero (use D and f) or between 0 and 1.7');
+    req(f_mm > 0 || NA_in > 0, 'Give either a focal length or a numerical aperture');
+    req(isFinite(pix_um) && pix_um >= 0, 'Pixel pitch must be zero (skip) or positive');
+    var lam_um = lam_nm / 1000, NA = NA_in > 0 ? NA_in : D_mm / (2 * f_mm), N = 1 / (2 * NA);
+    var r = (J1Z1 / PI) * lam_um * N, theta = (J1Z1 / PI) * lam_nm * 1e-9 / (D_mm * 1e-3);
+    var nyq = lam_um * N / 2, out = { NA: NA, fnum: N, r_um: r, d_um: 2 * r, r2_um: (J1Z2 / PI) * lam_um * N,
+      fwhm_um: (2 * AIRY_HM / PI) * lam_um * N, abbe_um: lam_um / (2 * NA), theta_urad: theta * 1e6, theta_arcsec: theta * R2D * 3600,
+      cutoff_lpmm: 1000 / (lam_um * N), nyq_um: nyq, px_per_d: null, sampled: null, source: NA_in > 0 ? 'NA' : 'D/f' };
+    if (pix_um > 0) { out.px_per_d = 2 * r / pix_um; out.sampled = pix_um <= nyq * (1 + 1e-12); }
+    return out;
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
