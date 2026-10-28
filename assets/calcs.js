@@ -392,6 +392,25 @@
       L50_um: Lc / 2, Ltarget_um: target > 0 ? Math.asin(Math.sqrt(target)) / kappa : null };
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, consts: { C: C, H: H, QE: QE } };
+  // 29. unbalanced Mach-Zehnder interferometer (Chrostowski & Hochberg 2015, ch. 4.5). lambda nm, group index n_g,
+  // arm length difference dL um, effective (phase) index n_eff, target FSR (0 = skip) in nm or GHz.
+  // FSR = lambda^2/(n_g dL) = c/(n_g dL) in frequency; dphi = 2 pi n_eff dL / lambda; ideal 50:50 splitter/combiner, lossless arms:
+  // port A = cos^2(dphi/2), port B = sin^2(dphi/2). Nearest port-A peak from linearised phase (slope set by n_g).
+  function mzi(lam_nm, ng, dL_um, neff, target, tunit) {
+    pos(lam_nm, 'Wavelength'); pos(ng, 'Group index'); pos(dL_um, 'Path length difference'); pos(neff, 'Effective index');
+    req(isFinite(target) && target >= 0, 'Target FSR must be zero (skip) or positive');
+    req(tunit === 'nm' || tunit === 'GHz', 'Unknown FSR unit');
+    var lam = lam_nm * 1e-9, dL = dL_um * 1e-6;
+    var fsr_m = lam * lam / (ng * dL), fsr_Hz = C / (ng * dL), tau = ng * dL / C;
+    var phi = 2 * PI * neff * dL / lam, orders = neff * dL / lam, wrapped = phi - 2 * PI * Math.floor(phi / (2 * PI));
+    var A = Math.pow(Math.cos(phi / 2), 2), d = wrapped > PI ? wrapped - 2 * PI : wrapped;
+    var dL_t = null;
+    if (target > 0) dL_t = tunit === 'nm' ? lam * lam / (ng * target * 1e-9) * 1e6 : C / (ng * target * 1e9) * 1e6;
+    return { fsr_nm: fsr_m * 1e9, fsr_GHz: fsr_Hz / 1e9, delay_ps: tau * 1e12, phi_rad: wrapped, phi_pi: wrapped / PI, orders: orders,
+      portA: A, portB: 1 - A, portA_pct: A * 100, portB_pct: (1 - A) * 100,
+      peakA_nm: lam_nm + d / (2 * PI) * fsr_m * 1e9, dL_target_um: dL_t };
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
