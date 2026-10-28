@@ -339,6 +339,28 @@
     return { dnu_Hz: dnu, dlam_pm: dnu * lam * lam / C * 1e12, tau_s: tau, Lc_vac_m: C * tau, Lc_m: C * tau / n, Lc_simple_m: C / (n * dnu), visibility: vis, shape: shape };
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, consts: { C: C, H: H, QE: QE } };
+  // 26. fiber chromatic dispersion. lambda nm, D ps/(nm km), L km, source spectral width dlam nm (0 = skip),
+  // input transform-limited Gaussian pulse FWHM ps (0 = skip). beta2 = -D lambda^2/(2 pi c); T0 = T_fwhm/(2 sqrt(ln2)); L_D = T0^2/|beta2|.
+  function dispersion(lam_nm, D, L_km, dlam_nm, tfwhm_ps) {
+    pos(lam_nm, 'Wavelength'); pos(L_km, 'Fiber length');
+    req(isFinite(D), 'Dispersion parameter D must be a number');
+    req(isFinite(dlam_nm) && dlam_nm >= 0, 'Source spectral width must be zero or positive');
+    req(isFinite(tfwhm_ps) && tfwhm_ps >= 0, 'Pulse width must be zero or positive');
+    var lam = lam_nm * 1e-9, Dsi = D * 1e-6;                                      // s/m^2
+    var b2 = -Dsi * lam * lam / (2 * PI * C);                                      // s^2/m
+    var b2_ps2km = b2 * 1e24 * 1e3;
+    var r = { beta2_ps2_km: b2_ps2km, total_ps_nm: D * L_km, regime: D > 0 ? 'anomalous (D > 0, β₂ < 0)' : D < 0 ? 'normal (D < 0, β₂ > 0)' : 'zero dispersion',
+      spread_ps: null, LD_km: null, tout_ps: null, broadening: null, chirp_rate_ps_nm: null };
+    if (dlam_nm > 0) r.spread_ps = Math.abs(D) * L_km * dlam_nm;
+    if (tfwhm_ps > 0) {
+      var T0 = tfwhm_ps / (2 * Math.sqrt(Math.LN2));
+      if (b2_ps2km !== 0) { r.LD_km = T0 * T0 / Math.abs(b2_ps2km); var x = L_km / r.LD_km; r.broadening = Math.sqrt(1 + x * x); }
+      else { r.LD_km = Infinity; r.broadening = 1; }
+      r.tout_ps = tfwhm_ps * r.broadening;
+    }
+    return r;
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
