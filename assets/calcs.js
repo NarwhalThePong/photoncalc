@@ -378,6 +378,20 @@
       dT_pm_K: lam_nm * 1e3 * (0.55e-6 + 8.6e-6), dEps_pm_ue: lam_nm * 1e3 * (1 - 0.22) * 1e-6 };
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, consts: { C: C, H: H, QE: QE } };
+  // 28. symmetric directional coupler (coupled-mode / supermode picture). lambda nm, supermode indices n_even > n_odd,
+  // coupler length um, target cross-port fraction (0 = skip). Beat (full-transfer) length L_c = lambda/(2*dn);
+  // kappa = pi*dn/lambda = pi/(2 L_c); P_cross = sin^2(kappa L), P_bar = cos^2(kappa L) (lossless, phase-matched).
+  function dirCoupler(lam_nm, n_even, n_odd, L_um, target) {
+    pos(lam_nm, 'Wavelength'); pos(n_even, 'Even supermode index'); pos(n_odd, 'Odd supermode index'); pos(L_um, 'Coupler length');
+    req(n_even > n_odd, 'The even (symmetric) supermode index must be larger than the odd one');
+    req(isFinite(target) && target >= 0 && target <= 1, 'Target cross fraction must be between 0 and 1');
+    var lam_um = lam_nm * 1e-3, dn = n_even - n_odd, Lc = lam_um / (2 * dn), kappa = PI * dn / lam_um, kL = kappa * L_um;
+    var cross = Math.pow(Math.sin(kL), 2);
+    return { dn: dn, Lc_um: Lc, kappa_per_um: kappa, kL: kL, cross: cross, cross_pct: cross * 100, bar_pct: (1 - cross) * 100,
+      cross_dB: cross > 0 ? 10 * Math.log10(cross) : -Infinity, bar_dB: cross < 1 ? 10 * Math.log10(1 - cross) : -Infinity,
+      L50_um: Lc / 2, Ltarget_um: target > 0 ? Math.asin(Math.sqrt(target)) / kappa : null };
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
