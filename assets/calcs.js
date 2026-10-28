@@ -361,6 +361,23 @@
     return r;
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, consts: { C: C, H: H, QE: QE } };
+  // 27. uniform fiber Bragg grating (Erdogan, J. Lightwave Technol. 15, 1277 (1997)). Bragg wavelength nm, n_eff,
+  // index modulation amplitude dn (ac), mode overlap eta (0..1], grating length mm. kappa = pi*eta*dn/lambda_B;
+  // R_peak = tanh^2(kappa L); zero-to-zero bandwidth = lambda_B^2/(pi n_eff L) * sqrt((kappa L)^2 + pi^2).
+  // Sensitivities for silica fiber: dlam/dT = lambda_B*(alpha + xi), alpha = 0.55e-6/K, xi = 8.6e-6/K (Othonos, Rev. Sci. Instrum. 68, 4309 (1997), Ge-doped silica);
+  // dlam/eps = lambda_B*(1 - p_e), p_e = 0.22.
+  function fbg(lam_nm, neff, dn, eta, L_mm) {
+    pos(lam_nm, 'Bragg wavelength'); pos(neff, 'Effective index'); pos(dn, 'Index modulation'); pos(L_mm, 'Grating length');
+    req(isFinite(eta) && eta > 0 && eta <= 1, 'Mode overlap must be between 0 and 1');
+    req(neff >= 1, 'Effective index must be at least 1');
+    var lam = lam_nm * 1e-9, L = L_mm * 1e-3;
+    var kappa = PI * eta * dn / lam, kL = kappa * L, t = Math.tanh(kL), R = t * t;
+    var bw0 = lam * lam / (PI * neff * L) * Math.sqrt(kL * kL + PI * PI);
+    return { period_nm: lam_nm / (2 * neff), kappa_per_mm: kappa * 1e-3, kL: kL, R: R, R_pct: R * 100,
+      R_dB: R < 1 ? 10 * Math.log10(1 - R) : -Infinity, bw0_nm: bw0 * 1e9,
+      dT_pm_K: lam_nm * 1e3 * (0.55e-6 + 8.6e-6), dEps_pm_ue: lam_nm * 1e3 * (1 - 0.22) * 1e-6 };
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
