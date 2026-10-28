@@ -306,6 +306,25 @@
       period_um: m * L1, period_first_um: L1, period_bulk_um: Lb, lambda_sh_nm: lp_nm / 2, lateral_guided: P.neff > P.side };
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, consts: { C: C, H: H, QE: QE } };
+  // 24. electro-optic (Pockels) modulator half-wave voltage. lambda nm, electrode gap g um, electrode length L mm,
+  // material 'tfln'|'bulkln' (congruent LN n_e from Jundt at 25 C, r33 = 30.9 pm/V) or 'custom' (n, r pm/V), overlap Gamma (0-1],
+  // config 'pp' (push-pull MZM, Vpi halved) | 'single' (phase modulator or single-arm MZM). Vpi = lambda g / (n^3 r Gamma L)
+  var R33LN = 30.9; // pm/V, LN r33 at 1550 nm (low-frequency/unclamped value commonly used in TFLN modulator papers)
+  function eoVpi(lam_nm, g_um, L_mm, mat, n, r_pmV, gamma, config) {
+    pos(lam_nm, 'Wavelength'); pos(g_um, 'Electrode gap'); pos(L_mm, 'Electrode length');
+    req(isFinite(gamma) && gamma > 0 && gamma <= 1, 'Overlap factor Γ must be between 0 and 1');
+    req(config === 'pp' || config === 'single', 'Unknown modulator configuration');
+    var nn, rr;
+    if (mat === 'tfln' || mat === 'bulkln') { req(lam_nm >= 400 && lam_nm <= 5000, 'Wavelength outside 400–5000 nm (LN Sellmeier fit range)'); nn = neCLN(lam_nm / 1000, 25); rr = R33LN; }
+    else if (mat === 'custom') { pos(n, 'Refractive index n'); pos(r_pmV, 'Electro-optic coefficient r'); nn = n; rr = r_pmV; }
+    else throw new Error('Unknown material');
+    var n3r = nn * nn * nn * rr * 1e-12;                                         // m/V
+    var vpm = lam_nm * 1e-9 * g_um * 1e-6 / (n3r * gamma * L_mm * 1e-3);          // V, single-arm phase modulator
+    var vpi = config === 'pp' ? vpm / 2 : vpm;
+    return { n: nn, r_pmV: rr, n3r_pmV: n3r * 1e12, vpi_pm_V: vpm, vpi_V: vpi, vpiL_Vcm: vpi * L_mm / 10, vpmL_Vcm: vpm * L_mm / 10,
+      dphi_rad_per_V: PI / vpi, dphi_deg_per_V: 180 / vpi, push_pull: config === 'pp' };
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
