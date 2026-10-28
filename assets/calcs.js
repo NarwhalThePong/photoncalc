@@ -426,6 +426,26 @@
       margin_dB: margin, ok: margin >= 0, maxL_km: Math.max(0, (budget - fixed) / alpha) };
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, consts: { C: C, H: H, QE: QE } };
+  // 31. OSNR of a chain of identical amplified spans (Agrawal 2010 ch. 7; Ramaswami et al. 2010). Each amplifier's gain G equals
+  // the span loss; its ASE (both polarizations) in the reference bandwidth B_ref is P_ASE = NF*h*nu*G*B_ref (high-gain approximation).
+  // N amplifiers add their ASE: OSNR = P_ch / (N*NF*h*nu*G*B_ref), i.e. OSNR[dB] = P_ch - L_span - NF - 10log10(N) - 10log10(h nu B_ref / 1 mW).
+  // At 1550 nm and B_ref = 0.1 nm the last term is +57.96 dB (the "58 dB rule"). B_ref[Hz] = c*dlam/lam^2.
+  function osnr(Pch_dBm, Lspan_dB, NF_dB, N, lam_nm, bref_nm, req_dB, nch) {
+    req(isFinite(Pch_dBm), 'Launch power per channel must be a number'); pos(Lspan_dB, 'Span loss');
+    req(isFinite(NF_dB) && NF_dB >= 0, 'Noise figure must be zero or positive (dB)');
+    [N, nch].forEach(function (n) { req(isFinite(n) && n >= 1 && Math.floor(n) === n, 'Number of spans and channels must be whole numbers of at least 1'); });
+    pos(lam_nm, 'Wavelength'); pos(bref_nm, 'Reference bandwidth');
+    req(isFinite(req_dB) && req_dB >= 0, 'Required OSNR must be zero (skip) or positive');
+    var lam = lam_nm * 1e-9, nu = C / lam, Bref = C * bref_nm * 1e-9 / (lam * lam);
+    var k_dB = -10 * Math.log10(H * nu * Bref / 1e-3);
+    var one = k_dB + Pch_dBm - Lspan_dB - NF_dB, tot = one - 10 * Math.log10(N);
+    var ase1 = NF_dB + Lspan_dB - k_dB, nmax = null, margin = null;
+    if (req_dB > 0) { margin = tot - req_dB; nmax = one >= req_dB ? Math.floor(Math.pow(10, (one - req_dB) / 10) + 1e-9) : 0; }
+    return { const_dB: k_dB, bref_GHz: Bref / 1e9, nu_THz: nu / 1e12, osnr1_dB: one, osnr_dB: tot, ase1_dBm: ase1,
+      aseN_dBm: ase1 + 10 * Math.log10(N), total_dBm: Pch_dBm + 10 * Math.log10(nch), margin_dB: margin,
+      ok: margin === null ? null : margin >= 0, nmax: nmax };
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
