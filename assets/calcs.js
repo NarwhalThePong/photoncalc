@@ -845,6 +845,52 @@
     return out;
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, prism: prism, waveplate: waveplate, cavity: cavity, raman: raman, slabWg: slabWg, aom: aom, kerr: kerr, airIndex: airIndex, consts: { C: C, H: H, QE: QE } };
+  // 43. Faraday rotator / optical isolator. lam nm; mat preset (single-transition fit V = F λ0²/(λ² − λ0²) + G, |V| in rad/(T m), room temperature, Vojna et al. 2019 Table 2)
+  // or 'custom' (|V| Vc at lam, dispersion Vc (λ² − λ0²)/(λ'² − λ0²) with λ0 = l0c, 0 = pure λ⁻²); mode 'rot' (θ from B, L), 'len' (L for target θ at B), 'field' (B for target θ at L)
+  // B_T tesla, L_mm, thT_deg target rotation (= output polarizer angle), er_dB polarizer extinction ratio, X_dB isolation target for the bands, T_C rotator temperature,
+  // Tref_C temperature at which V is specified, Tw_K Curie-Weiss temperature (V ∝ 1/(T − Tw), 0 = Curie law).
+  var FARADAY_MAT = { tgg: [820.3, -6.2, 239.3], tsag: [756.7, 0, 262], tslag: [801.6, 0, 258.2], cetag: [907.6, 0, 272], tb2o3: [1663.2, 0, 284.9], cef3: [697, 0, 245] };
+  function faraday(lam_nm, mat, Vc, l0c_nm, mode, B_T, L_mm, thT_deg, er_dB, X_dB, T_C, Tref_C, Tw_K) {
+    pos(lam_nm, 'Wavelength');
+    var A, G, l0, fit = mat !== 'custom';
+    if (fit) { var m = FARADAY_MAT[mat]; req(m, 'Unknown material'); l0 = m[2]; A = m[0] * l0 * l0; G = m[1]; }
+    else { pos(Vc, 'Verdet constant |V|'); req(isFinite(l0c_nm) && l0c_nm >= 0, 'Resonance wavelength λ₀ must be zero or positive'); l0 = l0c_nm; req(lam_nm > l0, 'Wavelength must be longer than λ₀'); A = Vc * (lam_nm * lam_nm - l0 * l0); G = 0; }
+    req(lam_nm > 1.05 * l0, 'Wavelength is too close to the material absorption resonance λ₀ = ' + l0 + ' nm');
+    req(mode === 'rot' || mode === 'len' || mode === 'field', 'Unknown mode');
+    req(isFinite(thT_deg) && thT_deg > 0 && thT_deg < 180, 'Target rotation must be between 0 and 180°');
+    req(isFinite(er_dB) && er_dB > 0, 'Polarizer extinction ratio must be a positive number of dB');
+    req(isFinite(X_dB) && X_dB > 0, 'Isolation target must be a positive number of dB');
+    req(isFinite(T_C) && isFinite(Tref_C) && isFinite(Tw_K), 'Temperatures must be numbers');
+    var TK = T_C + 273.15, TrK = Tref_C + 273.15;
+    req(TK > Tw_K && TrK > Tw_K && TK > 0, 'Temperatures must be above the Curie-Weiss temperature T_w (and above 0 K)');
+    var Vf = function (l) { return A / (l * l - l0 * l0) + G; };   // |V| at Tref, rad/(T m)
+    var s = (TrK - Tw_K) / (TK - Tw_K), V = Vf(lam_nm) * s;
+    req(V > 0, 'Verdet constant is not positive at this wavelength (outside the fit range)');
+    var thT = thT_deg * PI / 180, B = B_T, L = L_mm * 1e-3;
+    if (mode === 'rot') { pos(B_T, 'Magnetic field B'); pos(L_mm, 'Length L'); }
+    else if (mode === 'len') { pos(B_T, 'Magnetic field B'); L = thT / (V * B); }
+    else { pos(L_mm, 'Length L'); B = thT / (V * L); }
+    var th = V * B * L, eps2 = Math.pow(10, -er_dB / 10);
+    var Tf = function (t) { var c = Math.cos(t - thT); return c * c + eps2 * (1 - c * c); };   // forward: x-polarized in, polarizers at 0 and thT
+    var Tb = function (t) { var c = Math.cos(t + thT); return c * c + eps2 * (1 - c * c); };   // backward: light polarized along the exit polarizer, nonreciprocal rotation
+    var tb = Tb(th), iso = -10 * Math.log10(tb), out = { V: V, V_ref: Vf(lam_nm), Vmin: V / 290.8882086657216, sT: s, B_T: B, L_mm: L * 1e3, th_rad: th, th_deg: th * 180 / PI,
+      dbl_deg: 2 * th * 180 / PI, perLen_deg_mm: th * 180 / PI / (L * 1e3), err_deg: Math.abs(th - thT) < 1e-12 ? 0 : (th - thT) * 180 / PI, Tf: Tf(th), IL_dB: -10 * Math.log10(Tf(th)), Tb: tb, iso_dB: iso,
+      isoMax_dB: er_dB, inFit: !fit || (lam_nm >= 400 && lam_nm <= 1100) };
+    out.dth_dlam_deg_nm = -2 * A * lam_nm / Math.pow(lam_nm * lam_nm - l0 * l0, 2) * s * B * L * 180 / PI;
+    out.dth_dT_deg_K = -th / (TK - Tw_K) * 180 / PI;
+    var c2 = (Math.pow(10, -X_dB / 10) - eps2) / (1 - eps2);
+    out.bandOk = c2 > 0 && iso >= X_dB - 1e-9;
+    if (out.bandOk) {
+      var a = Math.asin(Math.sqrt(c2)), phi = th + thT, k = Math.round((phi - PI / 2) / PI), pn = PI / 2 + k * PI;
+      var tLo = pn - a - thT, tHi = pn + a - thT, BL = s * B * L, th0 = Vf(lam_nm) * B * L;   // allowed rotation window
+      var lamOf = function (t) { var v = t / BL - G; return v > 0 ? Math.sqrt(l0 * l0 + A / v) : Infinity; };
+      out.lamLo_nm = lamOf(tHi); out.lamHi_nm = lamOf(tLo);
+      out.TLo_C = Tw_K + th0 * (TrK - Tw_K) / tHi - 273.15; out.THi_C = tLo > 0 ? Tw_K + th0 * (TrK - Tw_K) / tLo - 273.15 : Infinity;
+      out.win_deg = 2 * a * 180 / PI;
+    }
+    return out;
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, prism: prism, waveplate: waveplate, cavity: cavity, raman: raman, slabWg: slabWg, aom: aom, kerr: kerr, faraday: faraday, airIndex: airIndex, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
