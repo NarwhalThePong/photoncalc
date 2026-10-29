@@ -599,6 +599,41 @@
     return out;
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, prism: prism, consts: { C: C, H: H, QE: QE } };
+  // 37. Wave plate retardance, thickness and Malus's law (Hecht, Optics, 5th ed., sec. 8.7 retarders and sec. 8.2 Malus's law;
+  // Born & Wolf, Principles of Optics, 7th ed., sec. 1.4.2 Stokes parameters; Hecht Table 8.1 quartz/calcite indices at 589.3 nm).
+  // Retardance in waves W = dn t / lambda (phase G = 2 pi W). Design thickness t = (m + R) lambda / dn for order m, target R waves.
+  // Linear input at 0 deg through a retarder with fast axis at theta: S1 = cos^2 2th + sin^2 2th cos G, S2 = sin 2th cos 2th (1 - cos G),
+  // |S3| = |sin 2th sin G|. Ellipticity chi = asin(|S3|)/2, axis ratio tan chi, major axis psi = atan2(S2, S1)/2.
+  // Analyzer at phi: T = (1 + S1 cos 2phi + S2 sin 2phi)/2 (Malus T = cos^2 phi when G = 0). Dispersion of dn is neglected for lambda2.
+  function waveplate(lam_nm, dn, R, m, t_um, lam2_nm, th_deg, phi_deg, P0) {
+    pos(lam_nm, 'Wavelength'); pos(dn, 'Birefringence |n_e - n_o|');
+    req(isFinite(t_um) && t_um >= 0, 'Thickness must be zero (design it) or positive');
+    req(isFinite(lam2_nm) && lam2_nm >= 0, 'Second wavelength must be zero (skip) or positive');
+    req(isFinite(th_deg) && isFinite(phi_deg), 'Angles must be numbers');
+    req(isFinite(P0) && P0 >= 0, 'Input power must be zero or positive');
+    var t;
+    if (t_um > 0) t = t_um * 1e3; // nm
+    else {
+      req(isFinite(R) && R > 0, 'Target retardance must be a positive number of waves (0.25 = quarter wave, 0.5 = half wave)');
+      req(isFinite(m) && m >= 0 && Math.floor(m) === m, 'Order must be a whole number, 0 for zero order');
+      t = (m + R) * lam_nm / dn;
+    }
+    var W = dn * t / lam_nm, frac = W - Math.floor(W);
+    if (Math.abs(frac - 1) < 1e-12 || Math.abs(frac) < 1e-12) frac = 0;
+    var G = 2 * PI * W, th2 = 2 * th_deg * D2R, c2 = Math.cos(th2), s2 = Math.sin(th2), cg = Math.cos(G);
+    var S1 = c2 * c2 + s2 * s2 * cg, S2 = s2 * c2 * (1 - cg), S3 = Math.abs(s2 * Math.sin(G));
+    if (S3 > 1) S3 = 1;
+    if (Math.abs(S1) < 1e-12) S1 = 0; if (Math.abs(S2) < 1e-12) S2 = 0; if (S3 < 1e-12) S3 = 0;
+    var chi = Math.asin(S3) / 2, psi = Math.atan2(S2, S1) / 2, ph2 = 2 * phi_deg * D2R;
+    var T = (1 + S1 * Math.cos(ph2) + S2 * Math.sin(ph2)) / 2;
+    if (T < 0) T = 0; if (T > 1) T = 1;
+    var out = { t_um: t / 1e3, W: W, ret_deg: W * 360, frac: frac, frac_deg: frac * 360, order: Math.floor(W + 1e-12),
+      dW_dnm: -W / lam_nm, bw_nm: 0.01 * lam_nm / W, S1: S1, S2: S2, S3: S3, chi_deg: chi * R2D, axis_ratio: Math.tan(chi),
+      psi_deg: psi * R2D, T: T, P_out: P0 * T, W2: null, frac2: null, frac2_deg: null };
+    if (lam2_nm > 0) { out.W2 = dn * t / lam2_nm; var f2 = out.W2 - Math.floor(out.W2); out.frac2 = f2; out.frac2_deg = f2 * 360; }
+    return out;
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, prism: prism, waveplate: waveplate, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
