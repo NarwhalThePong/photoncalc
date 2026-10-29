@@ -761,6 +761,42 @@
       V_TE1: PI + phTE, single_mode_TE: nTE === 1 };
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, prism: prism, waveplate: waveplate, cavity: cavity, raman: raman, slabWg: slabWg, airIndex: airIndex, consts: { C: C, H: H, QE: QE } };
+  // 41. acousto-optic modulator / deflector (Bragg cell). lam nm (vacuum), v m/s, M2 in 1e-15 s^3/kg, f MHz, d/L/H mm, P W, df MHz (0 = Bragg bandwidth)
+  var AOM_MAT = { teo2L: [2.26, 4200, 34.5], fs: [1.457, 5960, 1.51], ln: [2.20, 6570, 6.99], pbmo: [2.39, 3630, 36.3], ge: [4.0, 5500, 180] };
+  function aom(lam_nm, mat, n, v, M2e15, f_MHz, d_mm, L_mm, H_mm, P_W, df_MHz) {
+    if (mat && mat !== 'custom') { var pm = AOM_MAT[mat]; req(pm, 'Unknown material'); n = pm[0]; v = pm[1]; M2e15 = pm[2]; }
+    pos(lam_nm, 'Wavelength'); pos(n, 'Refractive index'); pos(v, 'Acoustic velocity'); pos(M2e15, 'Figure of merit M₂');
+    pos(f_MHz, 'Acoustic frequency'); pos(d_mm, 'Beam diameter'); pos(L_mm, 'Interaction length'); pos(H_mm, 'Transducer height');
+    req(isFinite(P_W) && P_W >= 0, 'Acoustic power must be zero or positive');
+    req(isFinite(df_MHz) && df_MHz >= 0, 'Scan bandwidth must be zero or positive');
+    req(n >= 1, 'Refractive index must be at least 1');
+    var lam = lam_nm * 1e-9, f = f_MHz * 1e6, d = d_mm * 1e-3, L = L_mm * 1e-3, Hh = H_mm * 1e-3, M2 = M2e15 * 1e-15;
+    var Lam = v / f, sIn = lam / (2 * n * Lam), sEx = lam / (2 * Lam);
+    req(sEx < 1, 'Acoustic wavelength too short: λ/(2Λ) ≥ 1, no Bragg angle exists');
+    var thIn = Math.asin(sIn), thEx = Math.asin(sEx);
+    var Q = 2 * PI * lam * L / (n * Lam * Lam);
+    var regime = Q >= 2 * PI ? 'Bragg (Q ≥ 2π): single diffracted order' : (Q <= 1 ? 'Raman–Nath (Q ≤ 1): many orders, Bragg formulas do not apply' : 'intermediate (1 < Q < 2π): expect leakage into higher orders');
+    var P100 = lam * lam * Hh / (2 * M2 * L);
+    var eta = Math.pow(Math.sin(PI / 2 * Math.sqrt(P_W / P100)), 2);
+    var dn = Math.sqrt(M2 * P_W / (L * Hh) / 2);
+    var tau = d / v, tr = 0.6407757827723002 * d / v; // 10-90 %: 2 erfinv(0.8) sqrt(2) sigma, sigma = d/4 (Gaussian, 1/e^2 diameter)
+    var bw = 2 * Math.sqrt(2 * Math.LN2) / PI * v / d; // modulation depth falls to 50 %
+    // Bragg (angular) bandwidth at fixed incidence: f -> f + dF, K -> K + dK, mismatch dk = ((K/2 + dK)^2 - (K/2)^2)/(2k);
+    // the diffracted power ~ sinc^2(dk L/2) falls to 1/2 at |dk| L/2 = 1.39156 (Chang 1976 linearizes this to 1.8 n v^2/(lambda f L))
+    var X0 = 1.3915573782515103, kk = 2 * PI * n / lam, K = 2 * PI / Lam, B = 4 * kk * X0 / L, hk = K / 2;
+    var fHi = f + (Math.sqrt(hk * hk + B) - hk) * v / (2 * PI), lowEdge = hk * hk > B;
+    var fLo = lowEdge ? f + (Math.sqrt(hk * hk - B) - hk) * v / (2 * PI) : null;
+    var dfB = lowEdge ? fHi - fLo : 2 * (fHi - f), dfLin = 4 * X0 / PI * n * v * v / (lam * f * L);
+    var dfUse = df_MHz > 0 ? df_MHz * 1e6 : dfB;
+    var nu = C / lam;
+    return { Lambda_um: Lam * 1e6, K_per_mm: 2 * PI / Lam / 1000, theta_in_mrad: thIn * 1e3, theta_in_deg: thIn * R2D, theta_ex_mrad: thEx * 1e3, theta_ex_deg: thEx * R2D,
+      sep_mrad: 2 * thEx * 1e3, sep_deg: 2 * thEx * R2D, dtheta_df_mrad_per_MHz: lam / v / Math.cos(thEx) * 1e9,
+      shift_MHz: f_MHz, nu_THz: nu / 1e12, dlam_fm: lam * lam * f / C * 1e15, Q: Q, regime: regime,
+      P100_W: P100, P50_W: P100 / 4, eta: eta, dn: dn, tau_ns: tau * 1e9, rise_ns: tr * 1e9, bw_MHz: bw / 1e6,
+      dfB_MHz: dfB / 1e6, dfLin_MHz: dfLin / 1e6, fLo_MHz: lowEdge ? fLo / 1e6 : null, fHi_MHz: fHi / 1e6, lowEdge: lowEdge, df_MHz: dfUse / 1e6, df_is_bragg: !(df_MHz > 0), scan_mrad: lam * dfUse / v * 1e3, spots: tau * dfUse,
+      n: n, v: v, M2e15: M2e15 };
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, prism: prism, waveplate: waveplate, cavity: cavity, raman: raman, slabWg: slabWg, aom: aom, airIndex: airIndex, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
