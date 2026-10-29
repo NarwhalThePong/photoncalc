@@ -683,6 +683,46 @@
     return out;
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, prism: prism, waveplate: waveplate, cavity: cavity, consts: { C: C, H: H, QE: QE } };
+  // 39. Raman shift. Absolute wavenumbers in cm^-1 from vacuum wavelengths in nm: nu = 1e7 / lam.
+  // Raman shift dnu = nu0 - nu_s (Stokes > 0, anti-Stokes < 0); Stokes line at nu0 - dnu, anti-Stokes at nu0 + dnu.
+  // Air wavelengths from the IAU standard (dry air, 15 C, 101325 Pa; Morton 2000, ApJS 130, 403, after Edlen/Birch & Downs):
+  // n - 1 = 8.34254e-5 + 2.406147e-2/(130 - s^2) + 1.5998e-4/(38.9 - s^2), s = 1/lam_vac in um^-1.
+  // Anti-Stokes/Stokes ratio (Long, The Raman Effect, 2002): I_aS/I_S = ((nu0 + dnu)/(nu0 - dnu))^p exp(-h c dnu / k T),
+  // p = 4 for power (energy) detection, 3 for photon counting (CCD). Inverse: T = (hc/k) dnu / ln(((nu0+dnu)/(nu0-dnu))^p / ratio).
+  var KB = 1.380649e-23;        // J/K, exact (SI 2019)
+  function airIndex(lamVac_nm) { var s2 = Math.pow(1000 / lamVac_nm, 2); return 1 + 8.34254e-5 + 2.406147e-2 / (130 - s2) + 1.5998e-4 / (38.9 - s2); }
+  function airToVac(lamAir_nm) { var v = lamAir_nm; for (var i = 0; i < 6; i++) v = lamAir_nm * airIndex(v); return v; }
+  function raman(lam0_nm, wl, mode, v, preset, T_K, ratio, p, nmpx, npx) {
+    pos(lam0_nm, 'Excitation wavelength'); req(lam0_nm >= 200 && lam0_nm <= 20000, 'Excitation wavelength must be between 200 and 20000 nm');
+    req(wl === 'vac' || wl === 'air', 'Unknown wavelength medium'); req(mode === 'shift' || mode === 'lam', 'Unknown mode');
+    req(p === 4 || p === 3, 'Frequency exponent must be 4 or 3');
+    var toVac = function (x) { return wl === 'air' ? airToVac(x) : x; };
+    var l0 = toVac(lam0_nm), nu0 = 1e7 / l0, dn, signed = null, type = null;
+    if (mode === 'shift') {
+      var pv = parseFloat(preset); dn = (isFinite(pv) && pv > 0) ? pv : Math.abs(v);
+      pos(dn, 'Raman shift'); req(dn < nu0, 'Raman shift must be smaller than the laser wavenumber (' + nu0.toFixed(1) + ' cm⁻¹)');
+    } else {
+      pos(v, 'Scattered wavelength'); req(v >= 150, 'Scattered wavelength must be at least 150 nm');
+      var lv = toVac(v); signed = nu0 - 1e7 / lv; dn = Math.abs(signed);
+      req(dn > 0, 'Scattered wavelength equals the laser wavelength (Rayleigh line, zero shift)');
+      type = signed > 0 ? 'Stokes (longer wavelength than the laser)' : 'anti-Stokes (shorter wavelength than the laser)';
+    }
+    var nuS = nu0 - dn, nuAS = nu0 + dn, lS = 1e7 / nuS, lAS = 1e7 / nuAS;
+    var hcm = H * C * 100; // J per cm^-1
+    var out = { lam0_vac: l0, lam0_air: l0 / airIndex(l0), nu0: nu0, shift: dn, signed: signed, type: type,
+      nuS: nuS, nuAS: nuAS, lamS_vac: lS, lamAS_vac: lAS, lamS_air: lS / airIndex(lS), lamAS_air: lAS / airIndex(lAS),
+      dlamS: lS - l0, dlamAS: lAS - l0, THz: dn * 100 * C / 1e12, meV: hcm * dn / QE * 1e3,
+      c2: hcm / KB, ratio: null, bose: null, T_from_ratio: null, cm_per_nm_S: 1e7 / (lS * lS), cm_per_nm_AS: 1e7 / (lAS * lAS),
+      cm_per_px: null, win_lo: null, win_hi: null, win_nm: null };
+    if (T_K > 0) { var x = hcm * dn / (KB * T_K); out.ratio = Math.pow(nuAS / nuS, p) * Math.exp(-x); out.bose = 1 / Math.expm1(x); }
+    if (ratio > 0) { var L = Math.log(Math.pow(nuAS / nuS, p) / ratio); req(L > 0, 'Measured anti-Stokes/Stokes ratio must be below the infinite-temperature limit ((ν₀+Δν)/(ν₀−Δν))^p = ' + Math.pow(nuAS / nuS, p).toFixed(4)); out.T_from_ratio = (hcm / KB) * dn / L; }
+    if (nmpx > 0) {
+      out.cm_per_px = nmpx * 1e7 / (lS * lS);
+      if (npx > 0) { var half = npx * nmpx / 2; req(lS - half > 0, 'Detector window is wider than the wavelength'); out.win_nm = npx * nmpx; out.win_lo = nu0 - 1e7 / (lS - half); out.win_hi = nu0 - 1e7 / (lS + half); }
+    }
+    return out;
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, prism: prism, waveplate: waveplate, cavity: cavity, raman: raman, airIndex: airIndex, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
