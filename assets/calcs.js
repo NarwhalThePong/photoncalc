@@ -797,6 +797,54 @@
       n: n, v: v, M2e15: M2e15 };
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, prism: prism, waveplate: waveplate, cavity: cavity, raman: raman, slabWg: slabWg, aom: aom, airIndex: airIndex, consts: { C: C, H: H, QE: QE } };
+  // 42. Kerr nonlinearity: B-integral, SPM, gamma, L_NL, self-focusing. lam nm (vacuum), n2 in 1e-20 m^2/W, geom 'free' (Gaussian beam, 1/e^2 radius w um)
+  // or 'guided' (effective area Aeff um^2), P_W peak power (0 = from E_J, tau_s FWHM, shape), L_m length, loss in dB per lossUnit (km | m | cm), b2 ps^2/km (0 = skip)
+  var KERR_MAT = { fs: [1.45, 2.74], smf: [1.45, 2.6], sapph: [1.75, 2.8], sin: [2.0, 24], si: [3.48, 400] };
+  var KERR_T0 = { gaussian: 2 * Math.sqrt(Math.LN2), sech2: 2 * Math.log(1 + Math.SQRT2) }; // T_FWHM / T0 (intensity profiles exp(-T^2/T0^2), sech^2(T/T0))
+  var KERR_CHIRP = { gaussian: Math.SQRT2 * Math.exp(-0.5), sech2: 4 / (3 * Math.sqrt(3)) }; // max |d f / d(T/T0)| of the intensity profile
+  var KERR_RMS = { gaussian: 4 / (3 * Math.sqrt(3)), sech2: 32 / 35 };                   // (rms spectral width / initial)^2 = 1 + c phi^2
+  function kerr(lam_nm, mat, n0, n2e20, geom, w_um, aeff_um2, P_W, E_J, tau_s, shape, L_m, loss, lossUnit, b2_ps2km) {
+    if (mat && mat !== 'custom') { var pm = KERR_MAT[mat]; req(pm, 'Unknown material'); n0 = pm[0]; n2e20 = pm[1]; }
+    pos(lam_nm, 'Wavelength'); pos(n0, 'Linear index n₀'); pos(n2e20, 'Nonlinear index n₂'); pos(L_m, 'Length');
+    req(n0 >= 1, 'Linear index must be at least 1');
+    req(geom === 'free' || geom === 'guided', 'Unknown beam type');
+    if (geom === 'free') pos(w_um, 'Beam radius w'); else pos(aeff_um2, 'Effective area A_eff');
+    req(isFinite(P_W) && P_W >= 0, 'Peak power must be zero (use energy and duration) or positive');
+    req(shape === 'gaussian' || shape === 'sech2' || shape === 'square', 'Unknown pulse shape');
+    req(isFinite(loss) && loss >= 0, 'Loss must be zero or positive');
+    var perM = { km: 1e-3, m: 1, cm: 100 }[lossUnit]; req(perM !== undefined, 'Unknown loss unit');
+    req(isFinite(b2_ps2km), 'β₂ must be a number (0 to skip)');
+    var tauOk = isFinite(tau_s) && tau_s > 0, P = P_W, fromE = false;
+    if (!(P_W > 0)) { pos(E_J, 'Pulse energy (or enter a peak power)'); req(tauOk, 'Pulse duration must be a positive number (or enter a peak power)'); P = SHAPE_K[shape] * E_J / tau_s; fromE = true; }
+    var lam = lam_nm * 1e-9, n2 = n2e20 * 1e-20, k0 = 2 * PI / lam;
+    var A = geom === 'free' ? PI * Math.pow(w_um * 1e-6, 2) : aeff_um2 * 1e-12;
+    var I = geom === 'free' ? 2 * P / A : P / A;          // on-axis peak (Gaussian beam) or mode-average P/Aeff
+    var alpha = loss * perM * Math.LN10 / 10;               // 1/m (power)
+    var Leff = alpha > 0 ? -Math.expm1(-alpha * L_m) / alpha : L_m;
+    var gamma = k0 * n2 / A;                                // 1/(W m), A = pi w^2 for a free Gaussian beam (mode-average convention)
+    var phiAvg = gamma * P * Leff, B = k0 * n2 * I * Leff;  // free beam: B = 2 phiAvg (on axis); guided: B = phiAvg
+    var phi = B;                                            // peak temporal phase that sets the SPM spectrum
+    var LNL = 1 / (gamma * P);
+    var Pcr = 1.8962 * lam * lam / (4 * PI * n0 * n2), PcrT = 1.86225 * lam * lam / (4 * PI * n0 * n2); // Gaussian-beam collapse threshold and Townes lower bound (Fibich & Gaeta 2000)
+    var risk = B < 1 ? 'small (B < 1 rad): weak SPM, usually negligible' : (B < 3 ? 'significant (1 ≤ B < 3 rad): clear SPM broadening, plan for it' : 'large (B ≥ 3 rad): strong SPM; in bulk amplifiers small-scale self-focusing grows ~ e^B (damage risk)');
+    var out = { n0: n0, n2e20: n2e20, P_W: P, fromE: fromE, A_um2: A * 1e12, I_Wcm2: I / 1e4, dn: n2 * I, gamma_WkM: gamma * 1e3, gamma_Wm: gamma, LNL_m: LNL,
+      alpha_m: alpha, Leff_m: Leff, phiAvg: phiAvg, B: B, B_pi: B / PI, risk: risk, Pcr_W: Pcr, PcrT_W: PcrT, P_Pcr: P / Pcr, geom: geom,
+      fKerr_m: geom === 'free' ? Math.pow(w_um * 1e-6, 2) / (4 * n2 * I * Leff) : null, peaks: phi >= 1.5 * PI ? Math.round(phi / PI + 0.5) : 1 };
+    var nu0 = C / lam;
+    if (tauOk && shape !== 'square') {
+      var T0 = tau_s / KERR_T0[shape], dw = KERR_CHIRP[shape] * phi / T0;
+      out.T0_fs = T0 * 1e15; out.dnu_max_GHz = dw / (2 * PI) / 1e9; out.dlam_max_nm = lam * lam * dw / (2 * PI) / C * 1e9;
+      out.rms_factor = Math.sqrt(1 + KERR_RMS[shape] * phi * phi);
+      out.bw0_GHz = (shape === 'gaussian' ? 2 * Math.LN2 / PI : 4 * Math.pow(Math.log(1 + Math.SQRT2), 2) / (PI * PI)) / tau_s / 1e9; // transform-limited FWHM
+      if (b2_ps2km !== 0) {
+        var b2 = b2_ps2km * 1e-27, LD = T0 * T0 / Math.abs(b2);
+        out.LD_m = LD; out.L_LD = L_m / LD; out.N = Math.sqrt(LD / LNL); out.normal = b2 > 0;
+        out.P1_W = b2 < 0 ? Math.abs(b2) / (gamma * T0 * T0) : null; out.z0_m = b2 < 0 ? PI / 2 * LD : null;
+      }
+    }
+    return out;
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, prism: prism, waveplate: waveplate, cavity: cavity, raman: raman, slabWg: slabWg, aom: aom, kerr: kerr, airIndex: airIndex, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
