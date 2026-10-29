@@ -723,6 +723,44 @@
     return out;
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, prism: prism, waveplate: waveplate, cavity: cavity, raman: raman, airIndex: airIndex, consts: { C: C, H: H, QE: QE } };
+  // 40. Planar (slab) dielectric waveguide, all guided TE and TM modes. Core nf, thickness d, substrate ns, cover nc (ns >= nc).
+  // Eigenvalue equation (Kogelnik, in Tamir, Integrated Optics, 1975; Saleh & Teich ch. 8):
+  // k0 d kf = m pi + atan(rs gs/kf) + atan(rc gc/kf), kf = k0 sqrt(nf^2 - N^2), g = k0 sqrt(N^2 - n^2), r = 1 (TE) or nf^2/n^2 (TM).
+  // Normalized V = k0 d sqrt(nf^2 - ns^2), asymmetry a = (ns^2 - nc^2)/(nf^2 - ns^2) (TM: a nf^4/nc^4), b = (N^2 - ns^2)/(nf^2 - ns^2).
+  // Mode m cuts off at V_m = m pi + atan(sqrt(a)). Power confinement in the core from the exact cos/exp fields (TM weighted by 1/n^2).
+  function slabMode(k0, d, nf, ns, nc, tm, m) {
+    var rs = tm ? nf * nf / (ns * ns) : 1, rc = tm ? nf * nf / (nc * nc) : 1;
+    var F = function (N) { var kf = k0 * Math.sqrt(nf * nf - N * N), gs = k0 * Math.sqrt(N * N - ns * ns), gc = k0 * Math.sqrt(N * N - nc * nc);
+      return d * kf - m * PI - Math.atan(rs * gs / kf) - Math.atan(rc * gc / kf); };
+    var a = ns * (1 + 1e-15), b = nf * (1 - 1e-15);
+    if (!(F(a) > 0)) return null;
+    for (var i = 0; i < 200; i++) { var c = (a + b) / 2; if (F(c) > 0) a = c; else b = c; }
+    var N = (a + b) / 2, kf = k0 * Math.sqrt(nf * nf - N * N), gs = k0 * Math.sqrt(N * N - ns * ns), gc = k0 * Math.sqrt(N * N - nc * nc);
+    var ps = Math.atan(rs * gs / kf), pc = Math.atan(rc * gc / kf);
+    var core = d / 2 + (Math.sin(2 * (kf * d - ps)) + Math.sin(2 * ps)) / (4 * kf);
+    var sub = Math.cos(ps) * Math.cos(ps) / (2 * gs), cov = Math.cos(pc) * Math.cos(pc) / (2 * gc);
+    var wf = tm ? 1 / (nf * nf) : 1, ws = tm ? 1 / (ns * ns) : 1, wc = tm ? 1 / (nc * nc) : 1;
+    var tot = wf * core + ws * sub + wc * cov;
+    return { N: N, b: (N * N - ns * ns) / (nf * nf - ns * ns), pen_s_um: 1 / gs, pen_c_um: 1 / gc, deff_um: d + 1 / gs + 1 / gc,
+      gamma: wf * core / tot, gamma_s: ws * sub / tot, gamma_c: wc * cov / tot };
+  }
+  function slabWg(lam_nm, d_um, nf, ns, nc) {
+    pos(lam_nm, 'Wavelength'); pos(d_um, 'Core thickness'); pos(nf, 'Core index'); pos(ns, 'Substrate index'); pos(nc, 'Cover index');
+    req(ns >= nc, 'Enter the higher of the two cladding indices as the substrate (n_s ≥ n_c)');
+    req(nf > ns, 'Core index must be higher than both cladding indices');
+    var k0 = 2 * PI / (lam_nm / 1000), NA = Math.sqrt(nf * nf - ns * ns), V = k0 * d_um * NA;
+    var aTE = (ns * ns - nc * nc) / (nf * nf - ns * ns), aTM = aTE * Math.pow(nf / nc, 4);
+    var phTE = Math.atan(Math.sqrt(aTE)), phTM = Math.atan(Math.sqrt(aTM));
+    var count = function (ph) { return V > ph ? Math.floor((V - ph) / PI) + 1 : 0; };
+    var nTE = count(phTE), nTM = count(phTM);
+    req(nTE <= 200, 'More than 200 guided modes: use a ray-optics or bulk model for such a thick slab');
+    var modes = function (n, tm) { var out = []; for (var m = 0; m < n; m++) { var r = slabMode(k0, d_um, nf, ns, nc, tm, m); if (r) { r.m = m; out.push(r); } } return out; };
+    var dcut = function (ph, m) { return (m * PI + ph) / (k0 * NA); };
+    return { V: V, NA: NA, aTE: aTE, aTM: aTM, nTE: nTE, nTM: nTM, te: modes(nTE, false), tm: modes(nTM, true),
+      d_TE0_cut_um: dcut(phTE, 0), d_TE1_cut_um: dcut(phTE, 1), d_TM0_cut_um: dcut(phTM, 0), d_TM1_cut_um: dcut(phTM, 1),
+      V_TE1: PI + phTE, single_mode_TE: nTE === 1 };
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, prism: prism, waveplate: waveplate, cavity: cavity, raman: raman, slabWg: slabWg, airIndex: airIndex, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
