@@ -891,6 +891,31 @@
     return out;
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, prism: prism, waveplate: waveplate, cavity: cavity, raman: raman, slabWg: slabWg, aom: aom, kerr: kerr, faraday: faraday, airIndex: airIndex, consts: { C: C, H: H, QE: QE } };
+  // 44. Doppler broadening / spectral line width. sp preset [vacuum λ nm, mass u, natural FWHM Γ/2π MHz] or 'custom' (lamc nm, mc u, gnc MHz);
+  // T_C gas temperature; gp_MHzTorr pressure-broadening coefficient (FWHM per Torr) and p_Torr pressure; L_cm cavity length (0 = skip) and n_cav cavity index.
+  // Doppler FWHM Δν_D = (ν0/c) sqrt(8 k T ln2 / m); Lorentzian FWHM f_L = Γ_nat + γ_p p; Voigt FWHM from Olivero & Longbothum (1977), 0.02 % accuracy.
+  var AMU = 1.66053906892e-27;  // kg, CODATA 2022
+  var DOPPLER_SP = { rb87: [780.241209686, 86.909180531, 6.0666], rb85: [780.241368271, 84.911789732, 6.0666], cs: [852.34727582, 132.905451961, 5.234],
+    na: [589.158326, 22.9897692820, 9.7946], k39: [766.700921822, 38.9637064864, 6.035], ne20: [632.991, 19.9924401754, 0], co2: [10591, 43.98982924, 0], h: [656.46, 1.00782503207, 0] };
+  function doppler(sp, lamc_nm, mc_u, gnc_MHz, T_C, gp_MHzTorr, p_Torr, L_cm, n_cav) {
+    var lam, M, Gn;
+    if (sp === 'custom') { pos(lamc_nm, 'Wavelength'); pos(mc_u, 'Mass'); req(isFinite(gnc_MHz) && gnc_MHz >= 0, 'Natural linewidth must be zero or positive'); lam = lamc_nm; M = mc_u; Gn = gnc_MHz; }
+    else { var s = DOPPLER_SP[sp]; req(s, 'Unknown species'); lam = s[0]; M = s[1]; Gn = s[2]; }
+    req(isFinite(T_C) && T_C + 273.15 > 0, 'Temperature must be above absolute zero');
+    req(isFinite(gp_MHzTorr) && gp_MHzTorr >= 0, 'Pressure-broadening coefficient must be zero or positive');
+    req(isFinite(p_Torr) && p_Torr >= 0, 'Pressure must be zero or positive');
+    req(isFinite(L_cm) && L_cm >= 0, 'Cavity length must be zero or positive');
+    var T = T_C + 273.15, m = M * AMU, kT = KB * T, nu0 = C / (lam * 1e-9), ln2 = Math.LN2;
+    var vp = Math.sqrt(2 * kT / m), fD = nu0 / C * Math.sqrt(8 * kT * ln2 / m), fC = gp_MHzTorr * p_Torr * 1e6, fL = Gn * 1e6 + fC;
+    var fV = 0.5346 * fL + Math.sqrt(0.2166 * fL * fL + fD * fD), l = lam * 1e-9;
+    var out = { lam_nm: lam, M_u: M, T_K: T, nu0_THz: nu0 / 1e12, wn_cm: 1e7 / lam, vp: vp, vmean: Math.sqrt(8 * kT / (PI * m)), vrms: Math.sqrt(3 * kT / m), vz_rms: Math.sqrt(kT / m),
+      fD_MHz: fD / 1e6, fD_pm: l * l * fD / C * 1e12, fD_cm: fD / C / 100, fD_frac: fD / nu0, hw1e_MHz: nu0 * vp / C / 1e6, dfD_dT_MHz_K: fD / (2 * T) / 1e6,
+      gPeak_perGHz: 2 / fD * Math.sqrt(ln2 / PI) * 1e9, Gn_MHz: Gn, tau_ns: Gn > 0 ? 1e3 / (2 * PI * Gn) : Infinity, fC_MHz: fC / 1e6, fL_MHz: fL / 1e6,
+      fV_MHz: fV / 1e6, fV_pm: l * l * fV / C * 1e12, ratioDL: fL > 0 ? fD / fL : Infinity,
+      Teq_K: fL > 0 ? m * C * C * fL * fL / (8 * KB * ln2 * nu0 * nu0) : 0, regime: fL === 0 ? 'pure Doppler (Gaussian)' : (fD > 3 * fL ? 'Doppler dominated' : (fL > 3 * fD ? 'homogeneous (Lorentzian) dominated' : 'mixed (Voigt)')) };
+    if (L_cm > 0) { pos(n_cav, 'Cavity refractive index'); var fsr = C / (2 * n_cav * L_cm / 100); out.fsr_MHz = fsr / 1e6; out.modesFWHM = fD / fsr; out.nModesMin = Math.floor(fD / fsr); out.nModesMax = Math.floor(fD / fsr) + 1; }
+    return out;
+  }
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, prism: prism, waveplate: waveplate, cavity: cavity, raman: raman, slabWg: slabWg, aom: aom, kerr: kerr, faraday: faraday, doppler: doppler, airIndex: airIndex, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
