@@ -488,6 +488,32 @@
       reduction: R > 0 ? Rb / R : Infinity };
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, consts: { C: C, H: H, QE: QE } };
+  // 34. Beer-Lambert absorption (Beer-Lambert-Bouguer law; Hecht, Optics, 5th ed., sec. 3.5 and 4.8; Saleh & Teich, Fundamentals of
+  // Photonics, 2nd ed., sec. 5.5; Born & Wolf, Principles of Optics, 7th ed., sec. 14.1; IUPAC Gold Book "absorbance", "Beer-Lambert law").
+  // Intensity I(L) = I0 exp(-alpha L) with the Napierian (power) absorption coefficient alpha. Decadic absorbance (optical density)
+  // A = log10(I0/I) = alpha L / ln10 = eps c L (eps = molar decadic absorptivity, L mol^-1 cm^-1). Loss in dB = 10 A, so
+  // alpha[cm^-1] = ln10/10 * dB/cm = 0.230259 * dB/cm. Complex index n + i kappa: alpha = 4 pi kappa / lambda0. Penetration depth 1/alpha,
+  // half-power length ln2/alpha, 99 % absorption length ln100/alpha. Ignores reflection at the faces, scattering and saturation.
+  function beerLambert(mode, v, conc_uM, lam_nm, L_mm, P0_mW) {
+    pos(v, 'Absorption value'); pos(L_mm, 'Path length');
+    req(isFinite(lam_nm) && lam_nm >= 0, 'Wavelength must be zero (skip) or positive');
+    req(isFinite(conc_uM) && conc_uM >= 0, 'Concentration must be zero or positive');
+    req(isFinite(P0_mW) && P0_mW >= 0, 'Input power must be zero (skip) or positive');
+    var LN10 = Math.LN10, Lcm = L_mm / 10, a;
+    if (mode === 'alpha') a = v;
+    else if (mode === 'dBcm') a = v * LN10 / 10;
+    else if (mode === 'dBm') a = v * LN10 / 1000;
+    else if (mode === 'od') a = v * LN10 / Lcm;
+    else if (mode === 'molar') { req(conc_uM > 0, 'Enter a concentration for the molar absorptivity mode'); a = v * conc_uM * 1e-6 * LN10; }
+    else if (mode === 'kappa') { req(lam_nm > 0, 'Enter the wavelength for the extinction coefficient (κ) mode'); a = 4 * PI * v / (lam_nm * 1e-7); }
+    else throw new Error('Unknown absorption input');
+    var A = a * Lcm / LN10, T = Math.exp(-a * Lcm);
+    return { mode: mode, alpha_cm: a, alpha_m: a * 100, a10_cm: a / LN10, dB_cm: 10 * a / LN10, A: A, loss_dB: 10 * A,
+      T_pct: T * 100, abs_pct: (1 - T) * 100, depth_um: 1e4 / a, half_mm: 10 * Math.LN2 / a, L99_mm: 10 * Math.log(100) / a,
+      kappa: lam_nm > 0 ? a * 100 * lam_nm * 1e-9 / (4 * PI) : null, P_out_mW: P0_mW > 0 ? P0_mW * T : null,
+      P_abs_mW: P0_mW > 0 ? P0_mW * (1 - T) : null };
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
