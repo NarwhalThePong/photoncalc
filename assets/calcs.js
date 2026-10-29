@@ -634,6 +634,55 @@
     return out;
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, prism: prism, waveplate: waveplate, consts: { C: C, H: H, QE: QE } };
+  // 38. Two-mirror laser resonator: stability, TEM00 mode, mode spacing (Kogelnik & Li, Appl. Opt. 5, 1550 (1966);
+  // Siegman, Lasers (1986), ch. 19 and sec. 19.3; Saleh & Teich, Fundamentals of Photonics, 2nd ed., ch. 10).
+  // g_i = 1 - L/R_i (R > 0 concave toward the cavity, 0 = flat i.e. R infinite, R < 0 convex). Stable if 0 < g1 g2 < 1
+  // (g1 = g2 = 0 symmetric confocal also has a mode). With lam_m = lam/n (cavity uniformly filled with index n):
+  // w1^2 = (L lam_m/pi) sqrt(g2/(g1(1-g1g2))), w2^2 = (L lam_m/pi) sqrt(g1/(g2(1-g1g2))),
+  // w0^2 = (L lam_m/pi) sqrt(g1g2(1-g1g2))/|g1+g2-2g1g2|, waist at d1 = L g2(1-g1)/(g1+g2-2g1g2) from mirror 1.
+  // FSR = c/(2nL); transverse spacing = FSR arccos(+-sqrt(g1g2))/pi (+ if g's > 0, - if < 0). Optional mirror
+  // reflectivities: finesse F = pi (R1R2)^(1/4)/(1 - sqrt(R1R2)), linewidth FSR/F, photon lifetime 1/(2 pi dnu), Q = nu/dnu.
+  function cavity(L_mm, R1_mm, R2_mm, lam_nm, n, Rm1_pct, Rm2_pct) {
+    pos(L_mm, 'Cavity length'); pos(lam_nm, 'Wavelength'); pos(n, 'Intracavity refractive index');
+    req(isFinite(R1_mm) && isFinite(R2_mm), 'Mirror radii must be numbers (0 = flat)');
+    req(isFinite(Rm1_pct) && Rm1_pct >= 0 && Rm1_pct < 100 && isFinite(Rm2_pct) && Rm2_pct >= 0 && Rm2_pct < 100, 'Mirror reflectivities must be between 0 and 100 % (0 = skip)');
+    var g1 = R1_mm === 0 ? 1 : 1 - L_mm / R1_mm, g2 = R2_mm === 0 ? 1 : 1 - L_mm / R2_mm;
+    if (Math.abs(g1) < 1e-12) g1 = 0; if (Math.abs(g2) < 1e-12) g2 = 0;
+    var gg = g1 * g2, L = L_mm * 1e-3, lm = lam_nm * 1e-9 / n, s = L * lm / PI, fsr = C / (2 * n * L);
+    var confocal = g1 === 0 && g2 === 0, stable = confocal || (gg > 1e-12 && gg < 1 - 1e-12);
+    var cfg;
+    if (g1 === 1 && g2 === 1) cfg = 'plane-parallel (marginal)';
+    else if (confocal) cfg = 'symmetric confocal';
+    else if (Math.abs(gg) < 1e-12) cfg = (g1 === 1 || g2 === 1) ? 'hemispherical (marginal)' : 'confocal-type edge g₁g₂ = 0 (marginal)';
+    else if (Math.abs(gg - 1) < 1e-12) cfg = (g1 === -1 && g2 === -1) ? 'concentric (marginal)' : 'stability edge g₁g₂ = 1 (marginal)';
+    else if (!stable) cfg = 'unstable';
+    else if (g1 === 1 || g2 === 1) cfg = 'plano-concave (stable)';
+    else if (Math.abs(g1 - g2) < 1e-12) cfg = 'symmetric (stable)';
+    else cfg = 'asymmetric (stable)';
+    var out = { g1: g1, g2: g2, gg: gg, stable: stable, config: cfg, fsr_Hz: fsr, t_rt_s: 2 * n * L / C,
+      w0_um: null, w1_um: null, w2_um: null, d1_mm: null, d2_mm: null, zR_mm: null, div_mrad: null, gouy_rt_deg: null, dnuT_Hz: null, dnuT_frac: null,
+      finesse: null, lw_Hz: null, tau_s: null, Q: null };
+    if (stable) {
+      var w0s, w1s, w2s, d1;
+      if (confocal) { w0s = s / 2; w1s = s; w2s = s; d1 = L / 2; }
+      else {
+        var den = g1 + g2 - 2 * gg;
+        w0s = s * Math.sqrt(gg * (1 - gg)) / Math.abs(den);
+        w1s = s * Math.sqrt(g2 / (g1 * (1 - gg))); w2s = s * Math.sqrt(g1 / (g2 * (1 - gg)));
+        d1 = L * g2 * (1 - g1) / den;
+      }
+      var acos = Math.acos((g1 + g2 >= 0 ? 1 : -1) * Math.sqrt(gg));
+      out.w0_um = Math.sqrt(w0s) * 1e6; out.w1_um = Math.sqrt(w1s) * 1e6; out.w2_um = Math.sqrt(w2s) * 1e6;
+      out.d1_mm = d1 * 1e3; out.d2_mm = (L - d1) * 1e3; out.zR_mm = PI * w0s / lm * 1e3; out.div_mrad = lm / (PI * Math.sqrt(w0s)) * 1e3;
+      out.gouy_rt_deg = 2 * acos * R2D; out.dnuT_frac = acos / PI; out.dnuT_Hz = fsr * acos / PI;
+    }
+    if (Rm1_pct > 0 && Rm2_pct > 0) {
+      var rr = Math.sqrt(Rm1_pct * Rm2_pct) / 100, F = PI * Math.sqrt(rr) / (1 - rr), dnu = fsr / F;
+      out.finesse = F; out.lw_Hz = dnu; out.tau_s = 1 / (2 * PI * dnu); out.Q = (C / (lam_nm * 1e-9)) / dnu;
+    }
+    return out;
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, prism: prism, waveplate: waveplate, cavity: cavity, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
