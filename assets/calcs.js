@@ -565,6 +565,40 @@
   }
 
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, consts: { C: C, H: H, QE: QE } };
+
+  // 36. Prism deviation and minimum deviation (Hecht, Optics, 5th ed., sec. 5.5.1; Born & Wolf, Principles of Optics, 7th ed., ch. 4;
+  // Jenkins & White, Fundamentals of Optics, 4th ed., ch. 2). Relative index nr = n/n0. Ray trace: sin t2 = sin t1 / nr, t3 = A - t2,
+  // sin t4 = nr sin t3 (TIR if > 1), deviation d = t1 + t4 - A. Minimum deviation (symmetric path t2 = t3 = A/2):
+  // d_min = 2 asin(nr sin(A/2)) - A, inverse nr = sin((A + d_min)/2) / sin(A/2). A ray can pass only if A < 2 asin(1/nr).
+  // Smallest incidence that still emerges (grazing exit): t1 = asin(nr sin(A - tc)), tc = asin(1/nr). Angular dispersion at minimum
+  // deviation dd/dn = 2 sin(A/2) / (n0 cos t1m); F-to-C index spread from the Abbe number dn = (n - 1)/V. Thin prism d ~ (nr - 1) A.
+  function prism(A_deg, mode, v, n0, th1_deg, V) {
+    req(isFinite(A_deg) && A_deg > 0 && A_deg < 180, 'Apex angle must be between 0 and 180 degrees');
+    pos(n0, 'Surrounding index');
+    req(isFinite(th1_deg) && th1_deg > -90 && th1_deg < 90, 'Incidence angle must be between -90 and 90 degrees (0 = use minimum deviation)');
+    req(isFinite(V) && V >= 0, 'Abbe number must be zero (skip) or positive');
+    var A = A_deg * D2R, s2 = Math.sin(A / 2), n;
+    if (mode === 'n') { pos(v, 'Refractive index'); n = v; }
+    else if (mode === 'dmin') { req(isFinite(v) && v > 0 && A_deg + v < 360, 'Minimum deviation must be a positive angle in degrees'); n = n0 * Math.sin((A + v * D2R) / 2) / s2; }
+    else throw new Error('Unknown mode');
+    var nr = n / n0;
+    req(nr > 1, 'The prism index must be higher than the surrounding index');
+    var tc = Math.asin(1 / nr), Amax = 2 * tc;
+    req(A < Amax, 'No ray can get through: the apex angle must be below ' + (Amax * R2D).toFixed(4) + '° (2 × critical angle) for this index');
+    var t1m = Math.asin(nr * s2), dmin = 2 * t1m - A, dd_dn = 2 * s2 / (n0 * Math.cos(t1m));
+    var t1g = Math.asin(nr * Math.sin(A - tc));
+    var out = { n: n, nr: nr, dmin_deg: dmin * R2D, t1m_deg: t1m * R2D, t2m_deg: A_deg / 2, thin_deg: (nr - 1) * A_deg,
+      crit_deg: tc * R2D, Amax_deg: Amax * R2D, t1_graze_deg: t1g * R2D, dd_dn_deg: dd_dn * R2D,
+      t1_deg: null, t2_deg: null, t3_deg: null, t4_deg: null, d_deg: null, tir: null, dn_FC: null, spread_deg: null, spread_mrad: null };
+    if (th1_deg !== 0) {
+      var t1 = th1_deg * D2R, t2 = Math.asin(Math.sin(t1) / nr), t3 = A - t2, s4 = nr * Math.sin(t3);
+      out.t1_deg = th1_deg; out.t2_deg = t2 * R2D; out.t3_deg = t3 * R2D; out.tir = s4 > 1;
+      if (!out.tir) { var t4 = Math.asin(s4); out.t4_deg = t4 * R2D; out.d_deg = (t1 + t4 - A) * R2D; }
+    }
+    if (V > 0) { out.dn_FC = (n - 1) / V; out.spread_deg = dd_dn * out.dn_FC * R2D; out.spread_mrad = dd_dn * out.dn_FC * 1e3; }
+    return out;
+  }
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, prism: prism, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
