@@ -514,6 +514,57 @@
       P_abs_mW: P0_mW > 0 ? P0_mW * (1 - T) : null };
   }
 
-  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, consts: { C: C, H: H, QE: QE } };
+  // 35. Blackbody radiation (Planck's law; Planck 1901; Siegel & Howell, Thermal Radiation Heat Transfer; Wolfe & Zissis, The Infrared
+  // Handbook). Spectral radiance L_lambda = eps 2hc^2 / lambda^5 / (exp(x) - 1), x = hc/(lambda k T); exitance M = pi L (Lambertian).
+  // Total exitance eps sigma T^4 with sigma = 2 pi^5 k^4/(15 h^3 c^2); photon exitance eps 4 pi zeta(3) k^3 T^3 / (h^3 c^2).
+  // Wien peak lambda_max = hc/(x5 k T), x5 = 4.965114231744276 (root of x = 5(1 - e^-x)); frequency peak nu_max = x3 k T / h,
+  // x3 = 2.821439372122079. Band fractions use I_p(x) = integral_x^inf t^p/(e^t - 1) dt = sum_n e^-nx sum_j p!/(p-j)! x^(p-j)/n^(j+1)
+  // (Siegel & Howell series) for x >= 2, and the Bernoulli-number series of the complement for x < 2. Constant (grey) emissivity.
+  var KB = 1.380649e-23;        // J/K, exact (SI 2019)
+  var BERN = [1, -0.5, 1 / 6, 0, -1 / 30, 0, 1 / 42, 0, -1 / 30, 0, 5 / 66, 0, -691 / 2730, 0, 7 / 6, 0, -3617 / 510, 0, 43867 / 798, 0, -174611 / 330, 0, 854513 / 138, 0, -236364091 / 2730, 0, 8553103 / 6];
+  var ZETA3 = 1.2020569031595942;
+  function planckTail(p, x) { // integral from x to infinity of t^p/(e^t - 1) dt, p = 2 or 3
+    var full = p === 3 ? Math.pow(PI, 4) / 15 : 2 * ZETA3, s = 0, n, j, k, fact;
+    if (x <= 0) return full;
+    if (x >= 2) {
+      for (n = 1; n <= 60; n++) {
+        var e = Math.exp(-n * x), t = 0, c = 1; // c = p!/(p-j)!
+        for (j = 0; j <= p; j++) { t += c * Math.pow(x, p - j) / Math.pow(n, j + 1); c *= (p - j); }
+        s += e * t; if (e < 1e-20) break;
+      }
+      return s;
+    }
+    for (k = 0, fact = 1; k < BERN.length; k++) { if (k > 0) fact *= k; if (BERN[k] !== 0) s += BERN[k] * Math.pow(x, k + p) / ((k + p) * fact); }
+    return full - s;
+  }
+  function blackbody(T_in, unit, eps, lam_um, l1_um, l2_um, area_cm2) {
+    req(isFinite(T_in), 'Temperature must be a number');
+    var T = unit === 'C' ? T_in + 273.15 : unit === 'F' ? (T_in - 32) * 5 / 9 + 273.15 : unit === 'K' ? T_in : NaN;
+    req(isFinite(T), 'Unknown temperature unit'); req(T > 0, 'Temperature must be above absolute zero');
+    req(isFinite(eps) && eps > 0 && eps <= 1, 'Emissivity must be between 0 and 1');
+    req(isFinite(lam_um) && lam_um >= 0, 'Wavelength must be zero (skip) or positive');
+    req(isFinite(l1_um) && l1_um >= 0 && isFinite(l2_um) && l2_um >= 0, 'Band edges must be zero or positive');
+    req(isFinite(area_cm2) && area_cm2 >= 0, 'Area must be zero (skip) or positive');
+    var hc = H * C, sigma = 2 * Math.pow(PI, 5) * Math.pow(KB, 4) / (15 * Math.pow(H, 3) * C * C);
+    var sigq = 4 * PI * ZETA3 * Math.pow(KB, 3) / (Math.pow(H, 3) * C * C);
+    var lpk = hc / (4.965114231744276 * KB * T), M = eps * sigma * Math.pow(T, 4), Mq = eps * sigq * Math.pow(T, 3);
+    function Llam(lam) { var x = hc / (lam * KB * T); return eps * 2 * hc * C / Math.pow(lam, 5) / Math.expm1(x) * 1e-6; } // W m^-2 sr^-1 um^-1
+    var out = { T_K: T, sigma: sigma, peak_um: lpk * 1e6, peak_nu_THz: 2.821439372122079 * KB * T / H / 1e12, M_Wm2: M, M_Wcm2: M / 1e4,
+      L_Wm2sr: M / PI, Mq_m2: Mq, Lpk: Llam(lpk), Mpk: PI * Llam(lpk), P_W: area_cm2 > 0 ? M * area_cm2 * 1e-4 : null,
+      L_lam: null, M_lam: null, Lq_lam: null, band_frac: null, band_Wm2: null, band_qfrac: null, band_q_m2: null, band_P_W: null };
+    if (lam_um > 0) { var lam = lam_um * 1e-6; out.L_lam = Llam(lam); out.M_lam = PI * out.L_lam; out.Lq_lam = out.L_lam * lam / hc; }
+    if (l1_um > 0 || l2_um > 0) {
+      req(l2_um > l1_um, 'Upper band edge must be longer than the lower edge (use 0 for the lower edge to start at zero wavelength)');
+      var x1 = l1_um > 0 ? hc / (l1_um * 1e-6 * KB * T) : Infinity, x2 = hc / (l2_um * 1e-6 * KB * T);
+      var fr = (x1 === Infinity ? planckTail(3, x2) : planckTail(3, x2) - planckTail(3, x1)) / (Math.pow(PI, 4) / 15);
+      var fq = (x1 === Infinity ? planckTail(2, x2) : planckTail(2, x2) - planckTail(2, x1)) / (2 * ZETA3);
+      out.band_frac = fr; out.band_Wm2 = fr * M; out.band_qfrac = fq; out.band_q_m2 = fq * Mq;
+      out.band_P_W = area_cm2 > 0 ? fr * M * area_cm2 * 1e-4 : null;
+    }
+    return out;
+  }
+
+
+  var PC = { photon: photon, power: power, dbRatio: dbRatio, gaussian: gaussian, thinLens: thinLens, numAperture: numAperture, vNumber: vNumber, snell: snell, pulse: pulse, neMgLN: neMgLN, ppln: ppln, fabryPerot: fabryPerot, grating: grating, lc: lc, qpm3: qpm3, pplnTemp: pplnTemp, ring: ring, sellmeier: sellmeier, coupling: coupling, gratingCoupler: gratingCoupler, tbp: tbp, photodiode: photodiode, focusSpot: focusSpot, cohLen: cohLen, neCLN: neCLN, slabN: slabN, tfln: tfln, eoVpi: eoVpi, coherence: coherence, dispersion: dispersion, fbg: fbg, dirCoupler: dirCoupler, mzi: mzi, linkBudget: linkBudget, osnr: osnr, airy: airy, arCoat: arCoat, beerLambert: beerLambert, blackbody: blackbody, consts: { C: C, H: H, QE: QE } };
   if (typeof module !== 'undefined' && module.exports) module.exports = PC; else root.PC = PC;
 })(this);
